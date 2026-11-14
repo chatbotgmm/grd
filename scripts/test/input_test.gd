@@ -138,6 +138,19 @@ func _process(_d: float) -> bool:
 			press(scr(sx + 20 + 500 - 28 - 75, 8 + 88 + 6 + (rh - 20) / 2), false)
 		14:
 			check("강화 버튼", int(g.upg[0]) == info.u0 + 1, "%d → %d" % [info.u0, int(g.upg[0])])
+			for k in 400:   # 조금 진행한 뒤 저장 → 처음 화면 → 이어하기
+				E.step(g, 0.05)
+			node.save_now()
+			info.saved = E.save_game(g)
+			node.scene = "title"
+			node.g = {}
+		15:
+			check("처음 화면에 이어하기 정보", not node.save_meta.is_empty(), str(node.save_meta))
+			press(scr(node.VW / 2.0, 378), true)   # 「이어하기」 버튼
+			press(scr(node.VW / 2.0, 378), false)
+		16:
+			check("이어하기로 같은 판", node.scene == "play" and E.save_game(node.g) == info.saved and node.paused, "웨이브 %d · 멈춤 %s" % [int(node.g.get("wave", -1)), str(node.paused)])
+			node.clear_save()
 			print("입력 시험 끝: 실패 %d" % fails)
 			quit(1 if fails else 0)
 	return false

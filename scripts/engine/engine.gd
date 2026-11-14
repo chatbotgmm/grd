@@ -1692,6 +1692,13 @@ static func load_game(text: String):
 				for key in e[mk]:
 					m2[int(key) if str(key).is_valid_int() else key] = e[mk][key]
 				e[mk] = m2
+	for dk in ["dmg", "dmgWave"]:   # 갈매미별 피해: JSON 키는 글자라서 갈매미 번호(정수)로 되돌림
+		var m3 := {}
+		var src = g.get(dk, {})
+		if typeof(src) == TYPE_DICTIONARY:
+			for key in src:
+				m3[int(key)] = float(src[key])
+		g[dk] = m3
 	var md := {}
 	var arr = g.get("missionDmg", [])
 	if typeof(arr) == TYPE_ARRAY:

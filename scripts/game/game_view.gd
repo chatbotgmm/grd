@@ -1,11 +1,18 @@
 # 게임 화면(2단계-1): 웹 판 defense.js의 가로 배치를 그대로 옮김.
 # 논리 화면 1312×960 = 왼쪽 판(논리 540×680을 LS배로 키움) + 오른쪽 열(SIDE_X부터 540폭: 위 칸 + 아래 메뉴).
-# 창(조합법·정보창·강화·외부탐사·더보기 …)은 windows.gd. 아직 없는 것(다음 단계): 공격 연출 그림, 소리, 이어하기, 같이하기, 꾸미기, 보스 경고.
+# 창(조합법·정보창·강화·외부탐사·더보기 …)은 windows.gd, 공격 연출은 fx.gd, 소리는 audio.gd. 아직 없는 것: 같이하기, 꾸미기, 첫 화면 꾸밈.
 extends Control
 
 const E = preload("res://scripts/engine/engine.gd")
 const Gfx = preload("res://scripts/game/gfx.gd")
 const Windows = preload("res://scripts/game/windows.gd")
+const Fx = preload("res://scripts/game/fx.gd")
+const Audio = preload("res://scripts/game/audio.gd")
+const SAVE_PATH := "user://defense_save.json"
+const SAVE_META := "user://defense_save_meta.json"
+# 보스 등장 때 닫는 보조 창(웹 판과 같음): 일시정지·결과·보상 고르기처럼 일부러 연 큰 창은 그대로
+const BOSS_CLOSE := ["book", "upgrade", "mission", "more", "storage", "recruit", "pick"]
+const GOAL_COLOR := [Color("#4fd1e8"), Color("#f07ad8"), Color("#a6e05a")]
 const FONT_PATH := "res://assets/fonts/workbench-noto-regular.otf"
 
 const W := 540.0
@@ -35,6 +42,12 @@ var modal: Dictionary = {}      # 열린 창(kind: book·upgrade·mission·more�
 var info: Dictionary = {}       # 갈매미 설명 창 {id, stack}
 var wins: Windows
 var search: LineEdit            # 조합법 이름 검색(창 위에 실제 입력칸을 겹침)
+var fx: Fx
+var audio: Audio
+var watch := {"wave": 0, "warn": 0, "md": 0}   # 판이 바뀐 것을 보고 소리·보스 경고
+var boss_warn := {"at": -99.0, "wave": 0}
+var save_meta: Dictionary = {}  # 이어하기 정보(웨이브·난이도·저장 시각)
+var save_at := 0.0
 
 
 func _ready() -> void:
@@ -54,11 +67,24 @@ func _ready() -> void:
 		if modal.get("kind") == "book":
 			modal.scroll = 0.0)
 	add_child(search)
+	fx = Fx.new(gfx)
+	audio = Audio.new()
+	add_child(audio)
+	save_meta = _read_json(SAVE_META)
+	if not FileAccess.file_exists(SAVE_PATH):
+		save_meta = {}
 
 
 func start(diff: String) -> void:
 	sel_diff = diff
-	g = E.new_game(randi() & 0xFFFFFFFF, "normal", diff)
+	_begin(E.new_game(randi() & 0xFFFFFFFF, "normal", diff))
+
+
+func _begin(game: Dictionary) -> void:
+	g = game
+	sel_diff = g.diff
+	watch = {"wave": g.wave, "warn": g.warn, "md": g.missionDone}
+	boss_warn = {"at": -99.0, "wave": 0}
 	scene = "play"
 	paused = false
 	selected = []
@@ -84,6 +110,91 @@ func show_info(id: String, from_card: bool = false) -> void:   # 설명 안에�
 	info = {"id": id, "stack": stack}
 
 
+# ── 이어하기(웹 판과 같은 저장 글자: E.save_game) ──
+func _read_json(path: String) -> Dictionary:
+	if not FileAccess.file_exists(path):
+		return {}
+	var o = JSON.parse_string(FileAccess.get_file_as_string(path))
+	return o if typeof(o) == TYPE_DICTIONARY else {}
+
+
+func save_now() -> void:
+	if g.is_empty() or scene != "play" or g.over != null:
+		return
+	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if f == null:
+		return
+	f.store_string(E.save_game(g))
+	f.close()
+	save_meta = {"wave": g.wave, "diff": g.diff, "at": Time.get_unix_time_from_system()}
+	var m := FileAccess.open(SAVE_META, FileAccess.WRITE)
+	if m != null:
+		m.store_string(JSON.stringify(save_meta))
+		m.close()
+
+
+func clear_save() -> void:
+	for p in [SAVE_PATH, SAVE_META]:
+		if FileAccess.file_exists(p):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(p))
+	save_meta = {}
+
+
+func resume() -> void:
+	if not FileAccess.file_exists(SAVE_PATH):
+		return
+	var game = E.load_game(FileAccess.get_file_as_string(SAVE_PATH))
+	if game == null:
+		say("저장한 판을 읽지 못했어요(규칙이 바뀌었을 수 있어요).")
+		clear_save()
+		return
+	_begin(game)
+	paused = true   # 이어하자마자 적이 밀려오지 않게 멈춘 채로
+	say("이어하기: 웨이브 %d부터" % g.wave)
+
+
+func _notification(what: int) -> void:
+	# 앱이 뒤로 가거나(휴대폰) 창을 닫을 때 저장
+	if what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_WM_CLOSE_REQUEST:
+		save_now()
+
+
+func combine(r: Dictionary, keep_uid: int = 0):
+	var nu = E.combine(g, r, keep_uid)
+	if nu != null:
+		audio.play("combine")
+	return nu
+
+
+func sfx(name: String) -> void:
+	audio.play(name)
+
+
+func _watch() -> void:   # 판 상태가 바뀐 것을 보고 소리·보스 경고(웹 판 sfxTick)
+	if g.wave != watch.wave:
+		if E.wave_info(g.wave).boss:
+			audio.play("boss")
+			_boss_alarm()
+		watch.wave = g.wave
+	if g.warn > watch.warn:
+		audio.play("warn")
+	watch.warn = g.warn
+	if g.missionDone > watch.md:
+		audio.play("story")
+	watch.md = g.missionDone
+	for f in g.fx:
+		if f.kind == "wisp" and not f.has("heard"):
+			f.heard = true
+			audio.play("wisp")
+
+
+func _boss_alarm() -> void:   # 보스 등장: 판을 가리는 보조 창을 닫고 빨간 경고(2.6초)
+	boss_warn = {"at": Time.get_ticks_msec() / 1000.0, "wave": g.wave}
+	info = {}
+	if BOSS_CLOSE.has(modal.get("kind", "")):
+		modal = {}
+
+
 func say(msg: String) -> void:
 	toast = {"msg": msg, "t": Time.get_ticks_msec() / 1000.0}
 
@@ -98,6 +209,12 @@ func _process(delta: float) -> void:
 		while acc >= 0.05:
 			E.step(g, 0.05)
 			acc -= 0.05
+		_watch()
+		if g.over != null:
+			clear_save()   # 끝난 판은 이어하기에서 지움
+		elif Time.get_ticks_msec() / 1000.0 - save_at > 5.0:
+			save_at = Time.get_ticks_msec() / 1000.0
+			save_now()
 		if g.get("choice") != null and not g.get("choiceLater", false) and modal.get("kind") != "choice" and (modal.is_empty() or modal.get("kind") == "mission"):
 			modal = {"kind": "choice"}   # 6장 보상 고르기
 			info = {}
@@ -139,22 +256,51 @@ func _draw() -> void:
 		search.position = wins.search_rect.position
 		search.size = wins.search_rect.size
 		search.add_theme_font_size_override("font_size", maxi(10, int(16 * view_s)))
+	_draw_boss_warn()
 	if paused and g.over == null:
 		_draw_pause()
 	if g.over != null:
 		_draw_over()
 
 
+func _draw_boss_warn() -> void:
+	var age: float = Time.get_ticks_msec() / 1000.0 - boss_warn.at
+	if age > 2.6 or g.over != null:
+		return
+	var fade := minf(1.0, minf(age / 0.15, (2.6 - age) / 0.5))
+	var pulse := 0.55 + 0.45 * absf(sin(age / 0.19))
+	var a := 0.42 * pulse * fade
+	var red := Color(1, 40 / 255.0, 40 / 255.0, a)
+	var clear := Color(1, 40 / 255.0, 40 / 255.0, 0)
+	var bw := minf(size.x, size.y) * 0.22   # 가장자리에서 안쪽으로 옅어지는 빨간 띠
+	var S := size
+	for q in [[Vector2(0, 0), Vector2(S.x, 0), Vector2(S.x - bw, bw), Vector2(bw, bw)], [Vector2(0, S.y), Vector2(S.x, S.y), Vector2(S.x - bw, S.y - bw), Vector2(bw, S.y - bw)],
+			[Vector2(0, 0), Vector2(0, S.y), Vector2(bw, S.y - bw), Vector2(bw, bw)], [Vector2(S.x, 0), Vector2(S.x, S.y), Vector2(S.x - bw, S.y - bw), Vector2(S.x - bw, bw)]]:
+		draw_polygon(PackedVector2Array(q), PackedColorArray([red, red, clear, clear]))
+	draw_rect(Rect2(Vector2(3, 3), S - Vector2(6, 6)), Color(1, 90 / 255.0, 80 / 255.0, 0.8 * pulse * fade), false, 6)
+	gfx.push(0, 0, LS)
+	var bx := 30.0
+	var by := 330.0
+	gfx.box(bx, by, W - 60, 92, Color(60 / 255.0, 8 / 255.0, 10 / 255.0, 0.9 * fade), Color(1, 107 / 255.0, 107 / 255.0, (0.6 + 0.4 * pulse) * fade), 12, 3)
+	gfx.fit_text("⚠ 보스 등장!", W / 2, by + 34, W - 90, 30, Color(1, 107 / 255.0, 107 / 255.0, fade), "center")
+	gfx.fit_text("웨이브 %d · 방어 %s · %s초 안에 잡아야 해요" % [boss_warn.wave, E.fmt(E.armor_at(g, boss_warn.wave)), E.fmt(E.RULES.waveLen)], W / 2, by + 70, W - 90, 15, Color(1, 210 / 255.0, 200 / 255.0, fade), "center")
+	gfx.pop()
+
+
 func _draw_title() -> void:
 	gfx.text("갈매미맨 랜덤 디펜스", VW / 2.0, 260, 54, C.goldEdge, "center")
-	gfx.text("고도 판 · 2단계(게임 화면) 시험 중", VW / 2.0, 330, 22, C.muted, "center")
-	gfx.text("난이도를 고르면 바로 시작해요", VW / 2.0, 420, 20, C.text, "center")
+	gfx.text("고도 판 · 시험 중", VW / 2.0, 320, 22, C.muted, "center")
+	if not save_meta.is_empty():
+		var dn: String = E.D.DIFFS.get(save_meta.get("diff", "master"), E.D.DIFFS.master).name
+		gfx.button(VW / 2.0 - 220, 350, 440, 56, "이어하기", func(): resume(), "primary", true, "웨이브 %d · %s" % [int(save_meta.get("wave", 1)), dn])
+	gfx.text("새로 시작: 난이도를 고르세요", VW / 2.0, 430, 20, C.text, "center")
 	var keys: Array = E.D.DIFF_ORDER
 	var bw := 200.0
 	var x0 := VW / 2.0 - (bw * keys.size() + 12 * (keys.size() - 1)) / 2.0
 	for i in keys.size():
 		var key: String = keys[i]
-		gfx.button(x0 + i * (bw + 12), 460, bw, 70, E.D.DIFFS[key].name, func(): start(key), "primary" if key == sel_diff else "normal")
+		gfx.button(x0 + i * (bw + 12), 460, bw, 70, E.D.DIFFS[key].name, func(): start(key), "normal" if not save_meta.is_empty() else ("primary" if key == sel_diff else "normal"))
+	_sound_buttons(VW / 2.0 - 220, 570)
 
 
 func _draw_field() -> void:
@@ -196,6 +342,7 @@ func _draw_field() -> void:
 	var list := E.field_units(g)
 	list.sort_custom(func(a, b): return a.y < b.y)
 	var last_shot := {}
+	var goal_cols := _goal_colors()
 	for f in g.fx:
 		if f.kind == "shot" and f.get("uid", 0) != 0:
 			var q = last_shot.get(f.uid)
@@ -220,6 +367,9 @@ func _draw_field() -> void:
 			zm = 1.0 + 0.07 * w
 		var is_sel := selected.has(u.uid)
 		gfx.ellipse(u.x, u.y, 20 * z, 7 * z, Color(0, 0, 0, 0.35), Color.WHITE if is_sel else GC[unit.grade], 3.0 if is_sel else 2.0)
+		var gcs: Array = goal_cols.get(u.id, [])
+		for gk in gcs.size():
+			gfx.ellipse(u.x, u.y, (24 + gk * 4) * z, (9 + gk * 2) * z, null, gcs[gk], 2.5)
 		var zz := z * zm
 		gfx.draw_fit(gfx.unit_tex(u.id), u.x + ox - 24 * zz, u.y + oy - 50 * zz, 48 * zz, 50 * zz)
 		if u.get("lock", false):
@@ -266,20 +416,42 @@ func _draw_field() -> void:
 	_draw_fx()
 
 
+func _goal_colors() -> Dictionary:   # 목표(☆) 조합법의 재료(가진 것 포함) → 목표 색들
+	var out := {}
+	for k in g.goals.size():
+		var gid: String = g.goals[k]
+		var r = E.recipe_for(gid)
+		if r == null:
+			continue
+		var ids := {}
+		for id in r.in:
+			ids[id] = true
+		var walk := func(n: Dictionary, self_fn: Callable) -> void:
+			if n.have:
+				ids[n.id] = true
+			for c in n.kids:
+				self_fn.call(c, self_fn)
+		walk.call(wins.need_tree(gid, E.count_on_field(g)), walk)
+		for id in ids:
+			if not out.has(id):
+				out[id] = []
+			out[id].append(GOAL_COLOR[k])
+	return out
+
+
 func _rect_line(x: float, y: float, w: float, h: float, col: Color, lw: float) -> void:
 	var p0 := gfx.P(x, y)
 	draw_rect(Rect2(p0, Vector2(w, h) * gfx.s), col, false, maxf(1.0, lw * gfx.s))
 
 
 func _draw_fx() -> void:
+	fx.labels = []
 	for f in g.fx:
 		var age: float = g.t - f.t
 		match f.kind:
 			"shot":
-				if age < 0.14:
-					var col: Color = C.phys if f.type == "phys" else C.mag
-					col.a = 1.0 - age / 0.14
-					gfx.line(f.x0, f.y0 - 24, f.x1, f.y1 - 10, col, 1.5 if f.job == "보조" else 2.5)
+				if age < 0.4:
+					fx.draw_shot(f, age, g.t)
 			"boom":
 				if age < 0.28:
 					var a := 1.0 - age / 0.28
@@ -298,11 +470,7 @@ func _draw_fx() -> void:
 				gfx.text("✦", f.x, f.y - 20 - (1.0 - a) * 30, 22, Color(GC[f.grade], a), "center")
 			"sig":
 				if age < 0.75:
-					var a := 1.0 - age / 0.75
-					gfx.line(f.x0, f.y0 - 20, f.x1, f.y1 - 10, Color(1, 0.85, 0.5, 0.8 * a), 3)
-					if f.has("r"):
-						gfx.ring(f.x1, f.y1 - 10, f.r, Color(1, 0.85, 0.5, 0.7 * a), 2)
-					gfx.text(f.name, f.x0, f.y0 - 70 - age * 20, 14, Color(C.goldEdge, a), "center")
+					fx.draw_sig(f, age)
 			"num":
 				if age < 0.75:
 					var a := minf(1.0, (1.0 - age / 0.75) * 1.6)
@@ -384,6 +552,11 @@ func _draw_hud() -> void:
 	var ta := "이감 %d%%" % slp
 	gfx.text(ta, gx, 77, 12, C.good if slp >= 60 else (C.goldEdge if slp >= 30 else C.muted))
 	gfx.text(" · 스턴 %d%%" % stp, gx + gfx.text_w(ta, 12), 77, 12, C.good if stp >= 30 else (C.goldEdge if stp > 0 else C.muted))
+	gfx.button(W - 164, 12, 46, 40, "♪", func():
+		audio.set_music(not audio.music_on)
+		say("배경음악 켬" if audio.music_on else "배경음악 끔"), "primary" if audio.music_on else "normal")
+	if not audio.music_on:   # 꺼짐: 음표 위에 빗금
+		gfx.line(W - 164 + 12, 12 + 31, W - 164 + 34, 12 + 9, Color("#ff8a7a"), 2.5)
 	gfx.button(W - 112, 12, 46, 40, "Ⅱ", func(): paused = true, "normal")
 	gfx.button(W - 60, 12, 46, 40, "×%d" % speed, func(): speed = {1: 2, 2: 3, 3: 1}[speed], "normal")
 	if g.news.size() > 0:
@@ -523,8 +696,19 @@ func _draw_main_panel(y0: float) -> void:
 
 func _summon(gr: String) -> void:
 	var res := E.summon(g, gr)
-	if not res.ok and res.why != "":
+	if res.ok:
+		audio.play("summon")
+	elif res.why != "":
 		say(res.why)
+
+
+func _sound_buttons(x: float, y: float) -> void:   # 배경음악 켜기/끄기 · 효과음 크기
+	gfx.button(x, y, 214, 48, "배경음악 %s" % ("켬" if audio.music_on else "끔"), func(): audio.set_music(not audio.music_on), "primary" if audio.music_on else "normal")
+	var vols := [0.0, 0.25, 0.5, 1.0]
+	var k := vols.find(audio.sfx_vol)
+	gfx.button(x + 226, y, 214, 48, "효과음 %s" % ("끔" if audio.sfx_vol <= 0 else "%d%%" % int(audio.sfx_vol * 100)), func():
+		audio.set_sfx_vol(vols[(k + 1) % vols.size()] if k >= 0 else 0.5)
+		audio.play("summon"), "normal")
 
 
 func _tip_lines(tips: Array, x: float, y0: float, max_w: float, col: Color) -> void:
@@ -661,12 +845,14 @@ func sel_units() -> Array:
 
 func _draw_pause() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), Color(3 / 255.0, 9 / 255.0, 14 / 255.0, 0.7))
-	gfx.box(VW / 2 - 240, 300, 480, 280, C.panel, C.edge, 14, 2)
+	gfx.box(VW / 2 - 240, 300, 480, 370, C.panel, C.edge, 14, 2)
 	gfx.text("일시정지", VW / 2, 360, 30, C.goldEdge, "center")
 	gfx.button(VW / 2 - 200, 410, 400, 64, "계속하기", func(): paused = false, "primary")
-	gfx.button(VW / 2 - 200, 490, 400, 56, "처음 화면으로", func():
+	gfx.button(VW / 2 - 200, 490, 400, 56, "저장하고 처음 화면으로", func():
+		save_now()
 		paused = false
 		scene = "title", "normal")
+	_sound_buttons(VW / 2 - 220, 600)
 
 
 func _draw_over() -> void:

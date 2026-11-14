@@ -223,7 +223,7 @@ func recipe_row(r: Dictionary, ok: bool, x: float, y: float, w: float, h: float,
 		v.say(("목표: %s (재료에 색 테두리)" % out.name) if on else "목표에서 뺐어요"), "quiet")
 	var capped := E.top_blocked(v.g, r)
 	gfx.button(bx + 46, y + 5, 58, h - 10, ("상위%s" % E.fmt(E.RULES.topCap)) if capped else "조합", func():
-		var nu = E.combine(v.g, r, keep_uid)
+		var nu = v.combine(r, keep_uid)
 		if nu != null:
 			v.selected = [nu.uid]
 			v.say("%s 완성!" % out.name), "primary", ok)
@@ -432,6 +432,7 @@ func draw_info() -> void:
 		gfx.button(bx, y + h - 76, bw, 56, "선택위습 사용", func():
 			var res := E.summon_pick(g, id)
 			if res.ok:
+				v.sfx("summon")
 				v.selected = [res.unit.uid]
 				v.say("%s 소환! (%s 선택 위습 %d개 남음)" % [u.name, E.D.GRADE_NAME[u.grade], int(g.picks.get(u.grade, 0))])
 			elif res.why != "":
@@ -474,7 +475,7 @@ func draw_info() -> void:
 	if pickable:
 		pick_btn.call(x + 26 + bw, bw)
 	gfx.button(x + 14 + (nb - 1) * (bw + 12), y + h - 76, bw, 56, "조합", func():
-		var nu = E.combine(g, r)
+		var nu = v.combine(r)
 		if nu != null:
 			v.selected = [nu.uid]
 			v.say("%s 완성!" % u.name)
@@ -729,6 +730,7 @@ func _pick() -> void:
 			gfx.hit(cx, cy, cw, ch, func():
 				var res := E.summon_pick(g, id)
 				if res.ok:
+					v.sfx("summon")
 					v.say("%s 소환!" % u.name)
 					if not (int(g.picks.get(gr2, 0)) > 0):
 						v.modal = {}
@@ -772,6 +774,7 @@ func _recruit() -> void:
 			if res.why != "":
 				v.say(res.why)
 			return
+		v.sfx("recruitFail" if res.get("fail", false) else "recruitOk")
 		v.modal.last = {"fail": true} if res.get("fail", false) else {"id": res.unit.id, "grade": res.grade}, "primary", tk >= cost, "모집권 %d개" % cost)
 	var L = v.modal.get("last")
 	var ry := y + 176 + bh + 24

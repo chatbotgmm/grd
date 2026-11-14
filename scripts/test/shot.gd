@@ -23,19 +23,26 @@ func _init() -> void:
 
 
 func _setup() -> void:
+	if what == "titlesave":   # 이어하기 버튼이 있는 처음 화면
+		node.start("high")
+		for k in 300:
+			E.step(node.g, 0.05)
+		node.save_now()
+		node.scene = "title"
+		return
 	if not node.has_method("start") or what == "title":
 		return
 	seed(7)
 	node.start("intro" if what != "over" else "master")
 	var g: Dictionary = node.g
-	var until := 330.0 if what != "boss" else 196.0
+	var until := 330.0 if not (what in ["boss", "bosswarn"]) else 196.0
 	var i := 0
 	while g.t < until and g.over == null:
 		E.step(g, 0.05)
 		i += 1
 		if i % 10 == 0:
 			Bot.act(g)
-	if what == "boss":
+	if what == "boss" or what == "bosswarn":
 		while g.over == null and not (E.wave_info(g.wave).boss and g.enemies.any(func(e): return e.boss)):
 			E.step(g, 0.05)
 	var f := E.field_units(g)
@@ -72,6 +79,22 @@ func _setup() -> void:
 	elif what == "choice":
 		g.choice = {"k": 5}
 		node.modal = {"kind": "choice"}
+	elif what == "goal":   # 목표 ☆ 두 개: 판 위 재료 발밑에 색 테두리
+		var n := 0
+		for r in E.RECIPES:
+			if E.tier_of(r.out) >= 3 and r.in.any(func(id): return f.any(func(u): return u.id == id)):
+				E.toggle_goal(g, r.out)
+				n += 1
+				if n >= 2:
+					break
+	elif what == "bosswarn":
+		node._boss_alarm()
+	elif what == "fx":   # 공격 연출이 보이는 순간: 원거리 투사체가 날아가는 중일 때 멈춤
+		for k in 400:
+			E.step(g, 0.05)
+			if g.fx.any(func(q): return q.kind == "shot" and not q.near and g.t - q.t < 0.04) and g.fx.any(func(q): return q.kind == "shot" and q.near and g.t - q.t < 0.04):
+				break
+		g.t -= 0.02   # 날아가는 중간 모습
 	elif what == "pause":
 		node.paused = true
 	elif what == "over":
