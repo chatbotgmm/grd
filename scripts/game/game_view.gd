@@ -1,10 +1,11 @@
 # 게임 화면(2단계-1): 웹 판 defense.js의 가로 배치를 그대로 옮김.
 # 논리 화면 1312×960 = 왼쪽 판(논리 540×680을 LS배로 키움) + 오른쪽 열(SIDE_X부터 540폭: 위 칸 + 아래 메뉴).
-# 아직 없는 것(다음 단계): 조합법 창·정보창·강화·외부탐사·더보기 창, 공격 연출 그림, 소리, 이어하기, 같이하기, 꾸미기.
+# 창(조합법·정보창·강화·외부탐사·더보기 …)은 windows.gd. 아직 없는 것(다음 단계): 공격 연출 그림, 소리, 이어하기, 같이하기, 꾸미기, 보스 경고.
 extends Control
 
 const E = preload("res://scripts/engine/engine.gd")
 const Gfx = preload("res://scripts/game/gfx.gd")
+const Windows = preload("res://scripts/game/windows.gd")
 const FONT_PATH := "res://assets/fonts/workbench-noto-regular.otf"
 
 const W := 540.0
@@ -30,6 +31,10 @@ var sel_diff := "master"
 var view_s := 1.0
 var view_o := Vector2.ZERO
 var freeze := false            # 화면 캡처용: 창 없이 시간만 멈춤
+var modal: Dictionary = {}      # 열린 창(kind: book·upgrade·mission·more·pick·recruit·storage·choice)
+var info: Dictionary = {}       # 갈매미 설명 창 {id, stack}
+var wins: Windows
+var search: LineEdit            # 조합법 이름 검색(창 위에 실제 입력칸을 겹침)
 
 
 func _ready() -> void:
@@ -37,6 +42,18 @@ func _ready() -> void:
 	gfx = Gfx.new(self, f if f != null else ThemeDB.fallback_font)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	resized.connect(queue_redraw)
+	wins = Windows.new(self)
+	search = LineEdit.new()
+	search.placeholder_text = "이름 검색"
+	search.visible = false
+	search.clear_button_enabled = true
+	if f != null:
+		search.add_theme_font_override("font", f)
+	search.text_changed.connect(func(t):
+		wins.book_opt.q = t.strip_edges()
+		if modal.get("kind") == "book":
+			modal.scroll = 0.0)
+	add_child(search)
 
 
 func start(diff: String) -> void:
@@ -45,7 +62,26 @@ func start(diff: String) -> void:
 	scene = "play"
 	paused = false
 	selected = []
+	modal = {}
+	info = {}
 	acc = 0.0
+
+
+func open_book(focus = null, using = null) -> void:
+	modal = {"kind": "book", "scroll": 0.0, "scrollable": true, "focus": focus, "using": using}
+	info = {}
+
+
+func open(kind: String) -> void:
+	modal = {"kind": kind, "scroll": 0.0}
+	info = {}
+
+
+func show_info(id: String, from_card: bool = false) -> void:   # 설명 안에서 재료를 누르면 그 재료로 파고들고 「뒤로」로 돌아옴
+	if not E.UNIT.has(id):
+		return
+	var stack: Array = (info.stack + [info.id]) if (from_card and not info.is_empty()) else []
+	info = {"id": id, "stack": stack}
 
 
 func say(msg: String) -> void:
@@ -62,6 +98,9 @@ func _process(delta: float) -> void:
 		while acc >= 0.05:
 			E.step(g, 0.05)
 			acc -= 0.05
+		if g.get("choice") != null and not g.get("choiceLater", false) and modal.get("kind") != "choice" and (modal.is_empty() or modal.get("kind") == "mission"):
+			modal = {"kind": "choice"}   # 6장 보상 고르기
+			info = {}
 		selected = selected.filter(func(uid):
 			var u = E.unit_by_id(g, uid)
 			return u != null and not u.away and not u.get("stored", false))
@@ -86,9 +125,20 @@ func _draw() -> void:
 	_draw_toast()
 	gfx.pop()
 	gfx.push(SIDE_X, 0, 1.0)
-	_draw_side_top()
+	if not modal.is_empty():
+		wins.draw()
+	else:
+		_draw_side_top()
 	_draw_bottom()
+	if not info.is_empty():
+		wins.draw_info()
 	gfx.pop()
+	var show_search: bool = modal.get("kind") == "book" and info.is_empty() and not paused and g.over == null
+	search.visible = show_search
+	if show_search:
+		search.position = wins.search_rect.position
+		search.size = wins.search_rect.size
+		search.add_theme_font_size_override("font_size", maxi(10, int(16 * view_s)))
 	if paused and g.over == null:
 		_draw_pause()
 	if g.over != null:
@@ -121,7 +171,7 @@ func _draw_field() -> void:
 	for sp in E.COMMON_SPOTS:
 		gfx.ellipse(sp.x, sp.y, 22, 8, null, Color(154 / 255.0, 165 / 255.0, 173 / 255.0, 0.35), 1.5)
 	# 고른 갈매미 사거리(한 마리일 때)
-	var sel := _sel_units()
+	var sel := sel_units()
 	if sel.size() == 1:
 		var k := E.kit(sel[0].id)
 		gfx.circle(sel[0].x, sel[0].y - 14, k.range, Color(243 / 255.0, 216 / 255.0, 158 / 255.0, 0.07))
@@ -382,7 +432,7 @@ func _draw_bottom() -> void:
 	var y0 := 672.0
 	gfx.box(8, y0, W - 16, VH - y0 - 8, C.panel, C.edge, 12)
 	_decor_corners(8, y0, W - 16, VH - y0 - 8)
-	var sel := _sel_units()
+	var sel := sel_units()
 	if sel.size() == 1:
 		_draw_unit_panel(y0, sel[0])
 	elif sel.size() > 1:
@@ -399,7 +449,7 @@ func _decor_corners(x: float, y: float, w: float, h: float, sz: float = 46.0) ->
 			draw_texture_rect(t, gfx.R(pair[1], pair[2], sz, sz * r), false, Color(1, 1, 1, 0.85))
 
 
-func _menu_button(x: float, y: float, w: float, h: float, icon: String, label: String, fn: Callable, style: String, sub: String, sub_col = null) -> void:
+func menu_button(x: float, y: float, w: float, h: float, icon: String, label: String, fn: Callable, style: String, sub: String, sub_col = null) -> void:
 	var prim := style == "primary"
 	if prim:
 		gfx.box(x, y, w, h, Color("#e3c27f"), Color("#fff3cf"), 12, 2)
@@ -453,18 +503,22 @@ func _draw_main_panel(y0: float) -> void:
 	var by := wy + wh + 10
 	var by2 := by + bh + 8
 	var rc := _ready_count()
-	_menu_button(22, by, b2, bh, "menu/icon-combine", "조합법", func(): say("조합법 창은 다음 단계에서 만들어요. 갈매미를 누르면 그 갈매미로 하는 조합이 나와요."), "primary" if rc else "normal", ("조합 가능 %d" % rc) if rc else ("%d개" % E.RECIPES.size()), Color("#1f5a3c") if rc else null)
+	menu_button(22, by, b2, bh, "menu/icon-combine", "조합법", func(): open_book(), "primary" if rc else "normal", ("조합 가능 %d" % rc) if rc else ("%d개" % E.RECIPES.size()), Color("#1f5a3c") if rc else null)
 	if rc:
 		_badge(22 + b2 - 6, by + 6, rc)
 	var can_up := false
 	for gi in 8:
 		if not E.upg_maxed(g, gi) and g.gold >= E.upgrade_cost(g, gi):
 			can_up = true
-	_menu_button(28 + b2, by, b2, bh, "ui/icon-goldenstrike", "강화", func(): say("강화 창은 다음 단계에서 만들어요."), "normal", "강화 가능" if can_up else "새우 %s" % E.fmt(int(g.gold)), C.good if can_up else null)
+	menu_button(28 + b2, by, b2, bh, "ui/icon-goldenstrike", "강화", func(): open("upgrade"), "normal", "강화 가능" if can_up else "새우 %s" % E.fmt(int(g.gold)), C.good if can_up else null)
 	var away := E.away_units(g).size()
 	var msub := "모두 완료" if g.missionDone >= E.REGIONS.size() else (("%d마리 탐사 중" % away) if away else ("%s장 가능" % E.fmt(E.REGIONS[g.missionDone].ch)))
-	_menu_button(22, by2, b2, bh, "menu/icon-explore", "외부탐사", func(): say("외부탐사 창은 다음 단계에서 만들어요. 갈매미를 누르고 「탐사」로 보낼 수 있어요."), "normal", msub)
-	_menu_button(28 + b2, by2, b2, bh, "menu/icon-draw", "더보기", func(): say("더보기 창은 다음 단계에서 만들어요."), "normal", "선택위습·모집·창고")
+	menu_button(22, by2, b2, bh, "menu/icon-explore", "외부탐사", func(): open("mission"), "normal", msub)
+	var mc := wins.pick_count() + (1 if int(g.tickets) >= int(E.RULES.recruitCost) else 0) + (1 if g.get("choice") != null else 0)
+	var msub2 := "보상 고르기" if g.get("choice") != null else (("선택위습 %d" % wins.pick_count()) if wins.pick_count() > 0 else "선택위습·모집·창고")
+	menu_button(28 + b2, by2, b2, bh, "menu/icon-draw", "더보기", func(): open("more"), "primary" if mc > 0 else "normal", msub2, Color("#3d2f1a") if mc > 0 else null)
+	if mc > 0:
+		_badge(28 + b2 + b2 - 6, by2 + 6, mc)
 
 
 func _summon(gr: String) -> void:
@@ -492,6 +546,7 @@ func _draw_unit_panel(y0: float, u: Dictionary) -> void:
 	var unit: Dictionary = E.UNIT[u.id]
 	var k := E.kit(u.id)
 	gfx.draw_fit(gfx.unit_tex(u.id), 18, y0 + 8, 68, 70)
+	gfx.hit(18, y0 + 8, 68, 70, func(): show_info(u.id))
 	gfx.fit_text(unit.name, 94, y0 + 22, 150, 21, C.text)
 	var cx := 94 + minf(150, gfx.text_w(unit.name, 21)) + 8
 	cx += gfx.chip(E.D.GRADE_NAME[unit.grade], cx, y0 + 11, GC[unit.grade]) + 6
@@ -525,9 +580,9 @@ func _draw_unit_panel(y0: float, u: Dictionary) -> void:
 	var rows_n := maxi(1, mini(4, int((by1 - 6 - (y0 + 112)) / 50)))
 	var cnt := E.count_on_field(g)
 	for i in mini(rows_n, list.size()):
-		_recipe_row(list[i][0], list[i][1], 18, y0 + 112 + i * 50, W - 36, 46, cnt, u.uid)
+		wins.recipe_row(list[i][0], list[i][1], 18, y0 + 112 + i * 50, W - 36, 46, cnt, u.uid)
 	var bx := func(i: int) -> float: return 22 + (i % 3) * (b6 + 6)
-	gfx.button(bx.call(0), by1, b6, BH, ("조합법 +%d" % (list.size() - rows_n)) if list.size() > rows_n else "조합법", func(): say("조합법 창은 다음 단계에서 만들어요."), "normal")
+	gfx.button(bx.call(0), by1, b6, BH, ("조합법 +%d" % (list.size() - rows_n)) if list.size() > rows_n else "조합법", func(): open_book(null, u.id), "normal")
 	gfx.button(bx.call(1), by1, b6, BH, "모으기", func():
 		selected = E.gather(g, u.uid)
 		say("같은 %s %d마리를 모았어요(고정한 것은 그 자리)." % [unit.name, selected.size()]), "normal")
@@ -539,38 +594,13 @@ func _draw_unit_panel(y0: float, u: Dictionary) -> void:
 		E.store(g, [u.uid])
 		selected = []
 		say("%s을(를) 창고에 넣었어요(조합 재료로는 쓰여요)." % unit.name), "normal")
-	gfx.button(bx.call(4), by2, b6, BH, "탐사", func(): _send([u]), "normal", E.mission_open(g))
+	gfx.button(bx.call(4), by2, b6, BH, "탐사", func(): send([u]), "normal", E.mission_open(g))
 	if special or k.tier >= E.TOP_TIER:
 		gfx.button(bx.call(5), by2, b6, BH, "판매 불가", func(): pass, "normal", false)
 	else:
 		gfx.button(bx.call(5), by2, b6, BH, "판매+%s" % E.fmt(k.sell), func():
 			E.sell(g, u.uid)
 			selected = [], "danger")
-
-
-func _recipe_row(r: Dictionary, ok: bool, x: float, y: float, w: float, h: float, cnt: Dictionary, keep_uid: int) -> void:
-	var out: Dictionary = E.UNIT[r.out]
-	gfx.box(x, y, w, h, Color(11 / 255.0, 30 / 255.0, 42 / 255.0, 0.85), Color("#6fd08a") if ok else Color(145 / 255.0, 122 / 255.0, 76 / 255.0, 0.45), 8, 2.0 if ok else 1.0)
-	gfx.draw_fit(gfx.unit_tex(r.out), x + 4, y + 2, 40, h - 4)
-	gfx.fit_text(out.name, x + 50, y + h / 2, 90, 15, GC[out.grade])
-	var left := cnt.duplicate()
-	var cx := x + 146
-	for id in r.in:
-		var have := int(left.get(id, 0)) > 0
-		if have:
-			left[id] -= 1
-		var nm: String = E.UNIT[id].name
-		var cw := gfx.text_w(nm, 12) + 10
-		if cx + cw > x + w - 76:
-			break
-		gfx.box(cx, y + h / 2 - 10, cw, 20, Color(0, 0, 0, 0.35), Color("#6fd08a") if have else GC[E.UNIT[id].grade], 6, 1)
-		gfx.text(nm, cx + cw / 2, y + h / 2, 12, C.good if have else C.muted, "center")
-		cx += cw + 3
-	gfx.button(x + w - 70, y + 6, 64, h - 12, "조합", func():
-		var nu = E.combine(g, r, keep_uid)
-		if nu != null:
-			selected = [nu.uid]
-			say("%s 완성!" % out.name), "primary" if ok else "normal", ok)
 
 
 func _draw_group_panel(y0: float, sel: Array) -> void:
@@ -603,7 +633,7 @@ func _draw_group_panel(y0: float, sel: Array) -> void:
 	var b4 := (W - 44 - 18) / 4.0
 	var all_lock := sel.all(func(u): return u.get("lock", false))
 	var uids := sel.map(func(u): return u.uid)
-	gfx.button(22, by, b4, BH, "탐사 보내기 (%d)" % sel.size(), func(): _send(sel), "normal", E.mission_open(g))
+	gfx.button(22, by, b4, BH, "탐사 보내기 (%d)" % sel.size(), func(): send(sel), "normal", E.mission_open(g))
 	gfx.button(22 + (b4 + 6), by, b4, BH, "창고로 (%d)" % sel.size(), func():
 		var n := E.store(g, uids)
 		selected = []
@@ -614,13 +644,13 @@ func _draw_group_panel(y0: float, sel: Array) -> void:
 	gfx.button(22 + 3 * (b4 + 6), by, b4, BH, "고르기 해제", func(): selected = [], "quiet")
 
 
-func _send(units: Array) -> void:
+func send(units: Array) -> void:
 	var n := E.send_away(g, units.map(func(u): return u.uid))
 	selected = []
 	say(("%d마리를 외부탐사에 보냈어요." % n) if n > 0 else "보낼 수 있는 갈매미가 없어요.")
 
 
-func _sel_units() -> Array:
+func sel_units() -> Array:
 	var out := []
 	for uid in selected:
 		var u = E.unit_by_id(g, uid)
@@ -668,6 +698,11 @@ func _unit_at(bp: Vector2):
 
 
 func _gui_input(ev: InputEvent) -> void:
+	if ev is InputEventMouseButton and ev.pressed and (ev.button_index == MOUSE_BUTTON_WHEEL_UP or ev.button_index == MOUSE_BUTTON_WHEEL_DOWN):
+		if modal.get("maxScroll", 0.0) > 0:
+			modal.scroll = clampf(float(modal.get("scroll", 0.0)) + (60.0 if ev.button_index == MOUSE_BUTTON_WHEEL_DOWN else -60.0), 0.0, modal.maxScroll)
+		accept_event()
+		return
 	var pressed := false
 	var released := false
 	var moved := false
@@ -691,9 +726,8 @@ func _gui_input(ev: InputEvent) -> void:
 	accept_event()
 	if pressed:
 		var h = gfx.hit_at(pos)
-		if h != null:
-			h.fn.call()
-			down = {}
+		if h != null:   # 버튼·창: 손을 뗄 때 누름(끌면 스크롤)
+			down = {"hit": h, "p0": pos, "moved": false, "scroll0": float(modal.get("scroll", 0.0))}
 			return
 		if scene != "play" or g.over != null or paused:
 			return
@@ -713,6 +747,13 @@ func _gui_input(ev: InputEvent) -> void:
 		else:
 			down = {"box": true, "x0": bp.x, "y0": bp.y, "x": bp.x, "y": bp.y, "moved": false}
 	elif moved:
+		if down.has("hit"):
+			var dy: float = pos.y - down.p0.y
+			if absf(dy) + absf(pos.x - down.p0.x) > 10 * maxf(1.0, view_s):
+				down.moved = true
+			if down.moved and modal.get("maxScroll", 0.0) > 0:
+				modal.scroll = clampf(down.scroll0 - dy / view_s, 0.0, modal.maxScroll)
+			return
 		var bp := _board_pos(pos)
 		down.x = bp.x
 		down.y = bp.y
@@ -720,11 +761,14 @@ func _gui_input(ev: InputEvent) -> void:
 			down.moved = true
 		if down.moved and down.has("unit"):
 			var dx: float = bp.x - down.x0
-			var dy: float = bp.y - down.y0
+			var dyy: float = bp.y - down.y0
 			for uid in down.start:
-				E.move_unit(g, uid, down.start[uid][0] + dx, down.start[uid][1] + dy, true)
+				E.move_unit(g, uid, down.start[uid][0] + dx, down.start[uid][1] + dyy, true)
 	elif released and down.size() > 0:
-		if down.get("box", false):
+		if down.has("hit"):
+			if not down.moved:
+				down.hit.fn.call()
+		elif down.get("box", false):
 			if down.moved:
 				var x0 := minf(down.x0, down.x)
 				var x1 := maxf(down.x0, down.x)
@@ -748,4 +792,16 @@ func _unhandled_key_input(ev: InputEvent) -> void:
 		KEY_1, KEY_2, KEY_3, KEY_4, KEY_5:
 			_summon(E.D.WISP_GRADES[ev.keycode - KEY_1])
 		KEY_ESCAPE:
-			selected = []
+			if not info.is_empty():
+				info = {}
+			elif not modal.is_empty():
+				modal = {}
+			else:
+				selected = []
+		KEY_B:
+			if modal.get("kind") == "book": modal = {}
+			else: open_book()
+		KEY_U:
+			open("upgrade")
+		KEY_M:
+			open("mission")

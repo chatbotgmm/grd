@@ -47,6 +47,31 @@ func _setup() -> void:
 		node.selected = [best.uid]
 	elif what == "group":
 		node.selected = f.slice(0, 9).map(func(u): return u.uid)
+	elif what == "book":
+		node.open_book()
+	elif what == "bookf":   # 역할 칩·검색이 켜진 조합법
+		node.open_book()
+		node.wins.book_roles = {"mag": true}
+		node.search.text = "드"
+		node.wins.book_opt.q = "드"
+	elif what == "info":
+		node.show_info("u62")
+	elif what == "info2":
+		node.show_info("u88")
+	elif what in ["upgrade", "mission", "more", "recruit"]:
+		node.open(what)
+		if what == "recruit":
+			g.tickets = 9.0
+	elif what == "pick":
+		g.picks.EPIC = 2
+		node.modal = {"kind": "pick", "grade": "EPIC"}
+	elif what == "storage":
+		E.store_group(g, "COMMON")
+		E.store_group(g, "UNCOMMON")
+		node.modal = {"kind": "storage", "scroll": 0.0, "scrollable": true}
+	elif what == "choice":
+		g.choice = {"k": 5}
+		node.modal = {"kind": "choice"}
 	elif what == "pause":
 		node.paused = true
 	elif what == "over":

@@ -98,6 +98,46 @@ func _process(_d: float) -> bool:
 			press(board(540 - 112 + 23, 32), false)
 		7:
 			check("일시정지 버튼", node.paused, "")
+			node.paused = false
+			var sx: float = node.SIDE_X
+			var b2 := (540.0 - 44 - 6) / 2.0
+			press(scr(sx + 22 + b2 / 2, 772 + 41), true)   # 「조합법」 메뉴 버튼
+			press(scr(sx + 22 + b2 / 2, 772 + 41), false)
+		8:
+			check("조합법 창 열기", node.modal.get("kind") == "book", str(node.modal.get("kind")))
+			var sx: float = node.SIDE_X
+			press(scr(sx + 300, 500), true)   # 목록을 위로 끌어 스크롤
+			move(scr(sx + 300, 460))
+			move(scr(sx + 300, 300))
+			press(scr(sx + 300, 300), false)
+		9:
+			check("목록 끌어 스크롤(누름은 안 됨)", float(node.modal.get("scroll", 0)) > 100 and node.info.is_empty(), "scroll %.0f" % float(node.modal.get("scroll", 0)))
+			node.modal.scroll = 0.0
+		10:
+			var sx: float = node.SIDE_X
+			press(scr(sx + 14 + 12 + 70, 8 + 126 + 30 + 3 + 23), true)   # 첫 조합법 줄(이름 부분) → 설명 창
+			press(scr(sx + 14 + 12 + 70, 8 + 126 + 30 + 3 + 23), false)
+		11:
+			check("조합법 줄 누르면 설명 창", not node.info.is_empty(), str(node.info))
+			var sx: float = node.SIDE_X
+			press(scr(sx + 14 + 512 - 96 + 41, 8 + 30), true)   # 설명 창 「닫기」
+			press(scr(sx + 14 + 512 - 96 + 41, 8 + 30), false)
+		12:
+			check("설명 창 닫기", node.info.is_empty(), "")
+			g.gold = 5000.0
+			info.u0 = int(g.upg[0])
+			var sx: float = node.SIDE_X
+			var b2 := (540.0 - 44 - 6) / 2.0
+			press(scr(sx + 28 + b2 + b2 / 2, 772 + 41), true)   # 「강화」 메뉴 버튼
+			press(scr(sx + 28 + b2 + b2 / 2, 772 + 41), false)
+		13:
+			check("강화 창 열기", node.modal.get("kind") == "upgrade", str(node.modal.get("kind")))
+			var sx: float = node.SIDE_X
+			var rh := minf(84.0, (652.0 - 96) / 8.0)
+			press(scr(sx + 20 + 500 - 28 - 75, 8 + 88 + 6 + (rh - 20) / 2), true)   # 커먼·언커먼 「강화」
+			press(scr(sx + 20 + 500 - 28 - 75, 8 + 88 + 6 + (rh - 20) / 2), false)
+		14:
+			check("강화 버튼", int(g.upg[0]) == info.u0 + 1, "%d → %d" % [info.u0, int(g.upg[0])])
 			print("입력 시험 끝: 실패 %d" % fails)
 			quit(1 if fails else 0)
 	return false

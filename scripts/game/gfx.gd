@@ -143,10 +143,14 @@ func text(t: String, x: float, y: float, size: float = 18.0, col: Color = C.text
 	ci.draw_string(font, p, t, HORIZONTAL_ALIGNMENT_LEFT, -1, px, col)
 
 
-func fit_text(t: String, x: float, y: float, max_w: float, size: float = 18.0, col: Color = C.text, align: String = "left") -> void:
+func fit_text(t: String, x: float, y: float, max_w: float, size: float = 18.0, col: Color = C.text, align: String = "left", min_size: float = 11.0) -> void:
 	var sz := size
-	while sz > 11 and text_w(t, sz) > max_w:
+	while sz > min_size and text_w(t, sz) > max_w:
 		sz -= 1
+	if text_w(t, sz) > max_w:   # 가장 작게 해도 넘치면 뒤를 「…」로(칸 밖으로 나가지 않게)
+		while t.length() > 1 and text_w(t + "…", sz) > max_w:
+			t = t.substr(0, t.length() - 1)
+		t += "…"
 	text(t, x, y, sz, col, align)
 
 
