@@ -8,7 +8,7 @@
 set -euo pipefail
 GODOT="${GODOT:?고도 실행 파일 경로를 GODOT에 넣어 주세요}"
 cd "$(dirname "$0")/.."
-mkdir -p export/web
+mkdir -p export/web && touch export/.gdignore   # 내보낸 파일을 고도가 자원으로 읽지 않게
 "$GODOT" --headless --path . --export-release "Web" export/web/index.html
 ls -la export/web
 echo "확인: (cd export/web && python3 -m http.server 8788) 뒤 브라우저에서 http://localhost:8788"
