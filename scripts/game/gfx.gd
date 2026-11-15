@@ -228,6 +228,30 @@ func button(x: float, y: float, w: float, h: float, label: String, fn: Callable,
 		hit(x, y, w, h, fn)
 
 
+# 게임 글꼴에 없는 기호는 직접 그림(웹 빌드는 운영체제 글꼴로 대신 그려 주지 않아 □로 깨짐): ✦ · ▸ · 자물쇠
+func sparkle(cx: float, cy: float, size: float, col: Color) -> void:   # ✦(네 갈래 별), size = 글자 크기 정도
+	var r := size * 0.42
+	var q := r * 0.28
+	var pts := PackedVector2Array()
+	for i in 8:
+		var a := -PI / 2 + i * PI / 4
+		var rr := r if i % 2 == 0 else q
+		pts.append(P(cx + cos(a) * rr, cy + sin(a) * rr))
+	ci.draw_colored_polygon(pts, col)
+
+
+func tri_right(x: float, cy: float, size: float, col: Color) -> float:   # ▸, 너비를 돌려줌
+	var h := size * 0.5
+	ci.draw_colored_polygon(PackedVector2Array([P(x, cy - h / 2), P(x + h * 0.85, cy), P(x, cy + h / 2)]), col)
+	return h * 0.85 + size * 0.3
+
+
+func lock_mark(cx: float, cy: float, col: Color) -> void:   # 위치 고정 자물쇠(어두운 동그라미 위)
+	circle(cx, cy, 8, Color(7 / 255.0, 19 / 255.0, 28 / 255.0, 0.9))
+	box(cx - 4, cy - 1, 8, 6, col, null, 1.5)
+	ci.draw_arc(P(cx, cy - 1), 2.6 * s, PI, TAU, 10, col, maxf(1.0, 1.5 * s), true)
+
+
 func chip(t: String, x: float, y: float, col: Color, size: float = 14.0) -> float:
 	var w := text_w(t, size) + 14
 	box(x, y, w, size + 8, Color(0, 0, 0, 0.35), col, 6, 1.5)

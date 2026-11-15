@@ -373,8 +373,7 @@ func _draw_field() -> void:
 		var zz := z * zm
 		gfx.draw_fit(gfx.unit_tex(u.id), u.x + ox - 24 * zz, u.y + oy - 50 * zz, 48 * zz, 50 * zz)
 		if u.get("lock", false):
-			gfx.circle(u.x + 22 * z, u.y - 2, 8, Color(7 / 255.0, 19 / 255.0, 28 / 255.0, 0.9))
-			gfx.text("🔒", u.x + 22 * z, u.y - 2, 10, C.goldEdge, "center")
+			gfx.lock_mark(u.x + 22 * z, u.y - 2, C.goldEdge)
 		if g.t - u.born < 0.5:
 			gfx.circle(u.x, u.y - 20 * z, 30 * z, Color(243 / 255.0, 216 / 255.0, 158 / 255.0, 0.35 * (1.0 - (g.t - u.born) / 0.5)))
 	# 적 체력 칸·스턴 별(갈매미보다 위)
@@ -467,7 +466,7 @@ func _draw_fx() -> void:
 				gfx.ring(f.x, f.y - 20, 20 + (1.0 - a) * 30, Color(C.goldEdge, a), 2.5)
 			"wisp":
 				var a := maxf(0.0, 1.0 - age / 0.8)
-				gfx.text("✦", f.x, f.y - 20 - (1.0 - a) * 30, 22, Color(GC[f.grade], a), "center")
+				gfx.sparkle(f.x, f.y - 20 - (1.0 - a) * 30, 22, Color(GC[f.grade], a))
 			"sig":
 				if age < 0.75:
 					fx.draw_sig(f, age)
@@ -534,8 +533,10 @@ func _draw_hud() -> void:
 		var na := E.armor_at(g, g.wave + 1)
 		var lx := 20 + gfx.text_w(line2, 15) + 10
 		var rf := 0.0 if nx.boss else E.rift_at(g.wave + 1)
-		var nt := "▸ 다음 %s%s" % [("보스! 방어 %s" % E.fmt(na)) if nx.boss else ("방어 %s" % E.fmt(na)), (" · 균열 저항 %d%%" % int(roundf(rf * 100))) if rf > 0 else ""]
-		gfx.fit_text(nt, lx, 58, W - 30 - lx, 14, Color("#ff8a7a") if nx.boss else (Color("#c9a3ff") if rf > 0 else (C.goldEdge if na > armor else C.muted)))
+		var nt := "다음 %s%s" % [("보스! 방어 %s" % E.fmt(na)) if nx.boss else ("방어 %s" % E.fmt(na)), (" · 균열 저항 %d%%" % int(roundf(rf * 100))) if rf > 0 else ""]
+		var ncol: Color = Color("#ff8a7a") if nx.boss else (Color("#c9a3ff") if rf > 0 else (C.goldEdge if na > armor else C.muted))
+		var tw := gfx.tri_right(lx, 58, 14, ncol)   # ▸(게임 글꼴에 없어 직접 그림)
+		gfx.fit_text(nt, lx + tw, 58, W - 30 - lx - tw, 14, ncol)
 	var n: int = g.enemies.size()
 	var lim := int(E.RULES.limit)
 	var ratio := minf(1.0, float(n) / lim)
@@ -666,7 +667,7 @@ func _draw_main_panel(y0: float) -> void:
 		gfx.box(x, wy, bw, wh, Color(11 / 255.0, 30 / 255.0, 42 / 255.0, 0.92 if n else 0.45), col if n else Color("#33434d"), 10, 2.0 if n else 1.0)
 		if n:
 			gfx.circle(x + bw * 0.3, wy + wh / 2, wh * 0.34, Color(col, 0.25))
-		gfx.text("✦", x + bw * 0.3, wy + wh / 2 + 1, minf(30, wh * 0.42), col if n else Color("#3d4c55"), "center")
+		gfx.sparkle(x + bw * 0.3, wy + wh / 2 + 1, minf(30, wh * 0.42), col if n else Color("#3d4c55"))
 		gfx.fit_text(E.D.GRADE_NAME[gr], x + bw * 0.72, wy + wh * 0.32, bw * 0.5, 13, col if n else Color("#5b6a73"), "center")
 		gfx.text(str(n), x + bw * 0.72, wy + wh * 0.68, minf(24, wh * 0.32), C.text if n else Color("#5b6a73"), "center")
 		if n:
